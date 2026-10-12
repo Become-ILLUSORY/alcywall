@@ -1,0 +1,13 @@
+# Build output
+/alcywall
+/dist/
+*.exe
+
+# Local scratch
+/tmp/
+*.log
+
+# Editor
+.idea/
+.vscode/
+.DS_Store

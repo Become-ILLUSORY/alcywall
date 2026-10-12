@@ -1,0 +1,114 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref — cheap way to keep CI minutes down.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.23.x'
+  # Both caches are shared by every job: the module cache never changes unless
+  # go.mod does, and the build cache is reused across GOOS/GOARCH pairs, so a
+  # 4-target cross build only compiles the standard library once.
+  GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+  GOCACHE: ${{ github.workspace }}/.cache/go-build
+
+jobs:
+  test:
+    name: vet + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # setup-go's own cache is keyed on go.mod; keep it for the toolchain
+          # and let the explicit cache below handle the rest.
+          cache: false
+
+      - name: cache go modules + build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/go-mod
+            .cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.job }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-
+            go-${{ runner.os }}-
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+      - name: build
+        run: go build -trimpath -o /dev/null .
+
+  build-matrix:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      # Restores the build cache the `test` job just filled, so this job only
+      # has to link, not recompile.
+      - name: cache go modules + build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/go-mod
+            .cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-build-matrix
+          restore-keys: |
+            go-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}-
+            go-${{ runner.os }}-
+
+      - name: cross compile
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          out="alcywall-${{ matrix.goos }}-${{ matrix.goarch }}"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=ci -X main.commit=${GITHUB_SHA::7}" \
+            -o "$out" .
+          ls -lh "$out"
+          file "$out" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alcywall-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: alcywall-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+          retention-days: 7
