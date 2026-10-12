@@ -318,6 +318,26 @@ func deeperIndent(parent string) string {
 	return parent + "    "
 }
 
+// fileIndentUnit sniffs the config's dominant indentation step by looking at the
+// first indented line. Files written by hand usually use either one tab or four
+// spaces; matching that keeps `git diff` clean instead of mixing styles.
+func fileIndentUnit(lines []string) string {
+	for _, raw := range lines {
+		if strings.TrimSpace(raw) == "" || strings.HasPrefix(strings.TrimSpace(raw), "//") {
+			continue
+		}
+		ind := raw[:len(raw)-len(strings.TrimLeft(raw, " \t"))]
+		if ind == "" {
+			continue
+		}
+		if strings.HasPrefix(ind, "\t") {
+			return "\t"
+		}
+		return ind
+	}
+	return "\t"
+}
+
 func insertLine(lines []string, at int, line string) []string {
 	out := make([]string, 0, len(lines)+1)
 	out = append(out, lines[:at]...)
@@ -350,9 +370,10 @@ func upsertNiriBackgroundColor(cfg, connector, hex string) (string, bool) {
 		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
 			lines = append(lines, "")
 		}
+		unit := fileIndentUnit(lines)
 		lines = append(lines,
 			fmt.Sprintf("output %q {", connector),
-			"\t"+setting,
+			unit+setting,
 			"}")
 		return strings.Join(lines, "\n"), true
 	}

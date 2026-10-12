@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestUpsertCreatesMissingOutputBlock(t *testing.T) {
 	in := "input {\n\tkeyboard {\n\t}\n}\n"
@@ -214,4 +217,36 @@ func indexOf(h, n string) int {
 		}
 	}
 	return -1
+}
+
+func TestUpsertFollowsFileIndentStyle(t *testing.T) {
+	// Space-indented file with no DP-1 block yet.
+	in := "input {\n    keyboard {\n    }\n}\n"
+	got, changed := upsertNiriBackgroundColor(in, "DP-1", "#111111")
+	if !changed {
+		t.Fatal("expected a change")
+	}
+	if !contains(got, "\n    background-color \"#111111\"\n") {
+		t.Fatalf("new block should use the file's 4-space style:\n%s", got)
+	}
+}
+
+func TestUpsertTabIndentedFileKeepsTabs(t *testing.T) {
+	in := "input {\n\tkeyboard {\n\t}\n}\n"
+	got, _ := upsertNiriBackgroundColor(in, "DP-1", "#222222")
+	if !contains(got, "\n\tbackground-color \"#222222\"\n") {
+		t.Fatalf("new block should use tabs:\n%s", got)
+	}
+}
+
+func TestFileIndentUnit(t *testing.T) {
+	if got := fileIndentUnit(strings.Split("a {\n\tb\n}", "\n")); got != "\t" {
+		t.Errorf("tab file → %q", got)
+	}
+	if got := fileIndentUnit(strings.Split("a {\n    b\n}", "\n")); got != "    " {
+		t.Errorf("space file → %q", got)
+	}
+	if got := fileIndentUnit(strings.Split("a {\nb\n}", "\n")); got != "\t" {
+		t.Errorf("flat file → %q", got)
+	}
 }
